@@ -1,0 +1,32 @@
+{
+  "Comment": "SCRIBE document processing pipeline — extract text via Textract and route by confidence",
+  "StartAt": "Extract",
+  "States": {
+    "Extract": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:us-east-1:948532067960:function:scribe-extract",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed", "Lambda.ServiceException"],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "Failed"
+        }
+      ],
+      "Next": "Done"
+    },
+    "Done": {
+      "Type": "Succeed"
+    },
+    "Failed": {
+      "Type": "Fail",
+      "Cause": "Lambda extraction failed after retries"
+    }
+  }
+}
