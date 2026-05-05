@@ -52,3 +52,17 @@ python3 scripts/aws_pipeline.py results grocery_contract
 ```
 
 See `docs/aws_workflow_reference.md` for more details.
+
+## Local vs AWS Pipeline
+
+Both pipelines share the same logical steps and logging schema but use different tools for each.
+
+| Aspect | Local | AWS |
+|--------|-------|-----|
+| OCR engine | Tesseract | Textract |
+| Preprocessing | Adaptive (CLAHE, deskew, upscale) | Not needed for Textract |
+| Storage | `outs/pipeline_latest/` | S3 prefixes (`raw/`, `working/`, `output/`, `review/`) |
+| Logging | JSONL file (`pipeline_events.jsonl`) | CloudWatch Logs (analagous to JSONL schema) |
+| Orchestration | `pipeline.py` sequential loop | EventBridge → Step Functions → Lambda |
+| Trigger | Manual (`python -m scribe.pipeline`) | Triggered automatically on S3 upload |
+

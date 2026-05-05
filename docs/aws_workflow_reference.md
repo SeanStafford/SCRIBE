@@ -15,7 +15,8 @@ How the SCRIBE AWS pipeline processes documents, from upload to results.
                                                                                        ├──► call API ─────►│
                                                                                        │◄── lines + conf ──┘
                                                                                        ├──► confidence gate
-                                                                                       └──► write results to S3
+                                                                                       ├──► write results to S3
+                                                                                       └──► log to CloudWatch
 ```
 
 ## Services
@@ -27,6 +28,7 @@ How the SCRIBE AWS pipeline processes documents, from upload to results.
 | Step Functions | `scribe-document-pipeline` | Runs the workflow with retry (2x) and error handling |
 | Lambda | `scribe-extract` | Validates input, calls Textract, scores confidence, routes output |
 | Textract | `DetectDocumentText` | Extracts text lines with bounding boxes and confidence scores |
+| CloudWatch | `/aws/lambda/scribe-extract` | Structured JSON logs matching local `PipelineLogger` format |
 
 ## Confidence Routing
 
@@ -57,6 +59,6 @@ invoke    Manually invoke Lambda on an uploaded document
 list      List documents in S3 by prefix
 results   View extraction results for a document
 status    Check Step Functions execution history
-logs      View structured log events
+logs      View structured CloudWatch log events
 search    Search for documents by name
 ```
