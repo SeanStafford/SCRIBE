@@ -51,6 +51,16 @@ python3 scripts/aws_pipeline.py upload data/images/grocery_contract.png
 python3 scripts/aws_pipeline.py results grocery_contract
 ```
 
+The Lambda function (`infra/lambda_extract.py`) is intentionally self-contained without any imports from `scribe` because Lambda deploys a standalone zip as a serverless function . The workflow definition lives in `infra/state_machine.json`.
+
+Each processed document produces three outputs in S3:
+
+| File | Location | Content |
+|------|----------|---------|
+| `textract_response.json` | `working/{doc_id}/` | Raw Textract API response |
+| `extracted_fields.json` | `working/{doc_id}/` | Parsed lines with confidence and bounding boxes |
+| `result.json` | `output/` or `review/` | Final result with text and confidence summary |
+
 See `docs/aws_workflow_reference.md` for more details.
 
 ## Local vs AWS Pipeline
