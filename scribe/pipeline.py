@@ -15,6 +15,7 @@ import yaml
 
 from scribe.logging import PipelineLogger
 from scribe.ocr import run_tesseract
+from scribe.postprocessing import postprocess
 from scribe.preprocessing import analyze_image, preprocess
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,14 @@ def process_image(
         },
     )
 
+    # --- postprocess ---
+    with plog.timed(name, "postprocess") as ctx:
+        post = postprocess(best_result["text"])
+        ctx["details"] = {
+            "corrections_applied": post["corrections_applied"],
+            "fields_extracted": {k: len(v) for k, v in post["fields"].items()},
+        }
+
     # --- build result ---
     result = {
         "name": name,
@@ -171,6 +180,10 @@ def process_image(
         },
         "best": best_pass,
         "routing": routing,
+        "postprocessing": {
+            "corrections_applied": post["corrections_applied"],
+            "fields": post["fields"],
+        },
         "notes": meta.get("notes", ""),
         "difficulty": meta.get("difficulty"),
     }
@@ -178,6 +191,11 @@ def process_image(
     # --- write outputs ---
     for pass_name, ocr in ocr_results.items():
         (img_out_dir / f"{pass_name}.txt").write_text(ocr["text"])
+    (img_out_dir / "corrected.txt").write_text(post["corrected_text"])
+    if post["fields"]:
+        (img_out_dir / "fields.json").write_text(
+            json.dumps(post["fields"], indent=2, ensure_ascii=False)
+        )
     (img_out_dir / "result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
     (img_out_dir / "words.json").write_text(
         json.dumps(best_result["words"], indent=2, ensure_ascii=False)
