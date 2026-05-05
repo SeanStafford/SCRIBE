@@ -1,0 +1,25 @@
+# Image manifest — canonical names, original filenames, and processing metadata
+#
+# canonical: short, filesystem-friendly name used throughout the pipeline
+# original:  actual filename in data/images/
+
+images:
+  grocery_contract:
+    original: "The Colored Grocery.png"
+
+
+  wiretap_transcript:
+    original: "Blurry_Document 1.png"
+
+
+  mpa_newsletter:
+    original: "IN-71-1.png"
+
+
+  vance_deed:
+    original: "Vance Homeplace and Cemetery on West Fork (2017) _ Brandon Ray Kirk.png"
+
+
+  rattler_page:
+    original: "The Rattler _ Edwards & Broughton Printing Company _ Free Download____.png"
+
