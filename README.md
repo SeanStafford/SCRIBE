@@ -50,3 +50,5 @@ make install-aws
 python3 scripts/aws_pipeline.py upload data/images/grocery_contract.png
 python3 scripts/aws_pipeline.py results grocery_contract
 ```
+
+See `docs/aws_workflow_reference.md` for more details.
