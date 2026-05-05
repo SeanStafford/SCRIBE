@@ -24,7 +24,7 @@ python -m scribe.pipeline            # Standard run
 python -m scribe.pipeline --demo     # Compare raw vs smart vs full preprocessing
 ```
 
-Output goes to `outs/pipeline_latest/` (symlinked to most recent run).
+Output goes to `outs/pipeline_latest/` (symlinked to most recent run). See `docs/pipeline_output_reference.md` for the full output format.
 
 ### Module structure
 
