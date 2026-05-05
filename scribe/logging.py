@@ -60,3 +60,25 @@ class PipelineLogger:
             f.write(json.dumps(record) + "\n")
 
         return record
+
+    @contextmanager
+    def timed(self, document_id: str, step: str, details: dict | None = None):
+        """Context manager that logs duration and catches errors.
+
+        Usage:
+            with log.timed("grocery_contract", "extract") as ctx:
+                result = run_tesseract(img)
+                ctx["details"] = {"engine": "tesseract", "confidence": 74.3}
+        """
+        ctx = {"details": dict(details) if details else {}}
+        t0 = time.monotonic()
+        try:
+            yield ctx
+            elapsed = int((time.monotonic() - t0) * 1000)
+            self.event(document_id, step, "SUCCESS", duration_ms=elapsed, details=ctx["details"])
+        except Exception as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            ctx["details"]["error_message"] = str(exc)
+            ctx["details"]["error_type"] = type(exc).__name__
+            self.event(document_id, step, "ERROR", duration_ms=elapsed, details=ctx["details"])
+            raise
