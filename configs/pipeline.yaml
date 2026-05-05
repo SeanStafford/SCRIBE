@@ -1,0 +1,33 @@
+# Pipeline configuration
+# In production, these would be environment-specific (dev/staging/prod)
+# and managed via AWS Systems Manager Parameter Store or similar.
+
+confidence_thresholds:
+  accept: 85    # >= this: results usable as-is
+  review: 60    # >= this but < accept: human spot-check recommended
+  # Below review threshold: ESCALATE to stronger engine or HITL
+
+preprocessing:
+  clahe_clip: 2.0               # CLAHE contrast limit. 2.0 is the OpenCV default; higher values increase local contrast but risk amplifying noise.
+  tile_grid_size: 8             # CLAHE tile size (8x8). Smaller = more local adaptation but slower.
+  target_short_side: 2000       # Upscale so the short side reaches ~2000px. Derived from the 12px x-height threshold: a typical document has ~50 lines, so 2000px / 50 = 40px line height, ~20px x-height — well above 12.
+  contrast_std_threshold: 55    # Skip CLAHE if pixel intensity std dev exceeds this. Clean images (e.g., rattler) don't benefit from CLAHE and can slightly degrade. Faded scans (e.g., vance) need it.
+
+ocr:
+  engine: tesseract
+  # OEM (OCR Engine Mode) — selects the recognition engine inside Tesseract:
+  #   0 = Legacy pattern-matching engine (character-by-character, needs tessdata with legacy weights)
+  #   1 = LSTM neural net engine (line-level CRNN+CTC recognizer, default since Tesseract 4.0)
+  #   2 = Legacy + LSTM combined
+  #   3 = Auto-select based on what's available in the traineddata file
+  oem: 1
+  # PSM (Page Segmentation Mode) — tells Tesseract how to interpret the page layout:
+  #   0  = OSD only (orientation and script detection, no OCR)
+  #   1  = Auto with OSD
+  #   3  = Fully automatic (default) — handles most documents
+  #   4  = Single column of variable-size text
+  #   6  = Single uniform block — best for clean single-column scans or pre-cropped regions
+  #   7  = Single text line — use when your own detector already isolated a line
+  #   11 = Sparse text — find as much text as possible in any arrangement
+  #   13 = Raw line — bypasses Tesseract-specific hacks, use with a perfect line crop
+  psm: 3
