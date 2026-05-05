@@ -108,6 +108,9 @@ def invoke_command(
     key: Optional[str] = typer.Option(
         None, "--key", "-k", help="Full S3 key (overrides doc_id lookup)"
     ),
+    postprocess: bool = typer.Option(
+        False, "--postprocess", "-p", help="Enable Bedrock post-correction (beta)"
+    ),
 ):
     """
     Manually invoke the Lambda function on an uploaded document.
@@ -122,7 +125,7 @@ def invoke_command(
 
         $ aws_pipeline.py invoke test-001
 
-        $ aws_pipeline.py invoke grocery_contract
+        $ aws_pipeline.py invoke test-002 --postprocess   # With Bedrock correction
 
         $ aws_pipeline.py invoke _ --key raw/2026/05/05/test-001/original.png
     """
@@ -133,10 +136,10 @@ def invoke_command(
             typer.secho(f"No document found matching '{doc_id}'", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
 
-    typer.echo(f"Invoking Lambda on {key}...")
+    typer.echo(f"Invoking Lambda on {key}{'  [postprocess=ON]' if postprocess else ''}...")
     response = lambda_client.invoke(
         FunctionName=LAMBDA_FUNCTION,
-        Payload=json.dumps({"bucket": BUCKET, "key": key}),
+        Payload=json.dumps({"bucket": BUCKET, "key": key, "postprocess": postprocess}),
     )
     result = json.loads(response["Payload"].read())
 
@@ -419,6 +422,168 @@ def logs_command(
         except (json.JSONDecodeError, KeyError):
             # Not our structured log — skip Lambda platform noise
             continue
+
+    typer.echo()
+
+
+# ---------------------------------------------------------------------------
+# stats
+# ---------------------------------------------------------------------------
+
+
+@app.command("stats")
+def stats_command(
+    hours: int = typer.Option(24, "--hours", "-h", help="Look back this many hours"),
+):
+    """
+    Show pipeline performance statistics from CloudWatch logs.
+
+    Aggregates latency, cost, confidence, and routing from recent executions.
+
+    Examples:\n
+
+        $ aws_pipeline.py stats              # Last 24 hours
+
+        $ aws_pipeline.py stats --hours 1    # Last hour
+    """
+    now_ms = int(time.time() * 1000)
+    start_ms = now_ms - (hours * 3600 * 1000)
+
+    # Collect structured log events
+    try:
+        response = logs.filter_log_events(
+            logGroupName=LOG_GROUP,
+            startTime=start_ms,
+            endTime=now_ms,
+            limit=500,
+        )
+    except logs.exceptions.ResourceNotFoundException:
+        typer.secho(f"Log group {LOG_GROUP} not found", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+
+    # Parse structured events
+    events_by_doc = {}
+    for event in response.get("events", []):
+        msg = event["message"].strip()
+        if "\t" in msg:
+            msg = msg.split("\t")[-1].strip()
+        try:
+            data = json.loads(msg)
+            if "document_id" not in data:
+                continue
+            doc_id = data["document_id"]
+            if doc_id not in events_by_doc:
+                events_by_doc[doc_id] = []
+            events_by_doc[doc_id].append(data)
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    # Collect Lambda REPORT lines for cost/memory
+    reports = []
+    for event in response.get("events", []):
+        msg = event["message"].strip()
+        if msg.startswith("REPORT"):
+            report = {}
+            for part in msg.split("\t"):
+                if "Duration" in part and "Billed" in part:
+                    report["billed_ms"] = float(part.split(":")[1].strip().split()[0])
+                elif "Max Memory Used" in part:
+                    report["memory_mb"] = int(part.split(":")[1].strip().split()[0])
+                elif "Init Duration" in part:
+                    report["init_ms"] = float(part.split(":")[1].strip().split()[0])
+            if report:
+                reports.append(report)
+
+    if not events_by_doc:
+        typer.echo(f"No pipeline events in the last {hours} hours.")
+        return
+
+    # --- Documents ---
+    doc_count = len(events_by_doc)
+    routing_counts = {"ACCEPT": 0, "REVIEW": 0, "ESCALATE": 0, "ERROR": 0}
+    confidences = []
+    for doc_id, events in events_by_doc.items():
+        for ev in events:
+            if ev.get("step") == "confidence_gate":
+                route = ev.get("details", {}).get("routing", "?")
+                routing_counts[route] = routing_counts.get(route, 0) + 1
+                conf = ev.get("details", {}).get("confidence_mean")
+                if conf:
+                    confidences.append(conf)
+            if ev.get("status") == "ERROR" and ev.get("step") == "extract":
+                routing_counts["ERROR"] += 1
+
+    typer.secho(f"\nPipeline Statistics (last {hours}h)", fg=typer.colors.BLUE, bold=True)
+    typer.echo("=" * 50)
+
+    typer.echo(f"\nDocuments processed: {doc_count}")
+    for route, count in routing_counts.items():
+        if count > 0:
+            color = typer.colors.GREEN if route == "ACCEPT" else (
+                typer.colors.RED if route == "ERROR" else typer.colors.YELLOW
+            )
+            typer.echo(f"  ", nl=False)
+            typer.secho(f"{route:12s}", fg=color, nl=False)
+            typer.echo(f" {count}")
+
+    # --- Latency ---
+    step_durations = {}
+    for doc_id, events in events_by_doc.items():
+        for ev in events:
+            step = ev.get("step", "?")
+            dur = ev.get("duration_ms")
+            if dur:
+                if step not in step_durations:
+                    step_durations[step] = []
+                step_durations[step].append(dur)
+
+    if step_durations:
+        typer.echo(f"\nLatency (ms)")
+        typer.echo(f"  {'Step':20s}  {'avg':>8s}  {'min':>8s}  {'max':>8s}  {'count':>6s}")
+        typer.echo(f"  {'─' * 56}")
+        for step in ["validate", "extract", "confidence_gate", "persist"]:
+            if step in step_durations:
+                durs = step_durations[step]
+                avg = sum(durs) / len(durs)
+                typer.echo(
+                    f"  {step:20s}  {avg:8.0f}  {min(durs):8.0f}  {max(durs):8.0f}  {len(durs):6d}"
+                )
+
+    # --- Confidence ---
+    if confidences:
+        avg_conf = sum(confidences) / len(confidences)
+        typer.echo(f"\nConfidence")
+        typer.echo(f"  Mean:  {avg_conf:.1f}%")
+        typer.echo(f"  Min:   {min(confidences):.1f}%")
+        typer.echo(f"  Max:   {max(confidences):.1f}%")
+
+    # --- Cost ---
+    textract_cost_per_page = 0.0015  # DetectDocumentText
+    lambda_cost_per_gb_sec = 0.0000166667
+    textract_pages = doc_count  # 1 page per doc (sync API)
+
+    typer.echo(f"\nEstimated Cost")
+    textract_total = textract_pages * textract_cost_per_page
+    typer.echo(f"  Textract:  {textract_pages} pages x ${textract_cost_per_page}/page"
+               f"  = ${textract_total:.4f}")
+
+    if reports:
+        total_billed_ms = sum(r.get("billed_ms", 0) for r in reports)
+        avg_memory_mb = sum(r.get("memory_mb", 0) for r in reports) / len(reports)
+        gb_seconds = (total_billed_ms / 1000) * (avg_memory_mb / 1024)
+        lambda_total = gb_seconds * lambda_cost_per_gb_sec
+        typer.echo(f"  Lambda:    {total_billed_ms / 1000:.1f}s billed, "
+                   f"{avg_memory_mb:.0f} MB avg  = ${lambda_total:.4f}")
+        typer.echo(f"  Total:     ${textract_total + lambda_total:.4f}")
+
+        typer.echo(f"\nLambda Runtime")
+        typer.echo(f"  Invocations:     {len(reports)}")
+        typer.echo(f"  Avg billed:      {total_billed_ms / len(reports):.0f} ms")
+        typer.echo(f"  Avg memory used: {avg_memory_mb:.0f} MB / 256 MB")
+        cold_starts = sum(1 for r in reports if "init_ms" in r)
+        if cold_starts:
+            avg_init = sum(r["init_ms"] for r in reports if "init_ms" in r) / cold_starts
+            typer.echo(f"  Cold starts:     {cold_starts} (avg init: {avg_init:.0f} ms)")
 
     typer.echo()
 

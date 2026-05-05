@@ -17,9 +17,11 @@ logger.setLevel(logging.INFO)
 
 s3 = boto3.client("s3")
 textract = boto3.client("textract")
+bedrock = boto3.client("bedrock-runtime")
 
 BUCKET = "scribe-idp-demo"
 CONFIDENCE_THRESHOLD = 90.0
+BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 def log_event(document_id: str, step: str, status: str, duration_ms: int = None, **details):
@@ -48,6 +50,9 @@ def handler(event, context):
         # Direct invocation or Step Functions
         bucket = event.get("bucket", BUCKET)
         key = event["key"]
+
+    # Optional flags
+    enable_postprocess = event.get("postprocess", False)
 
     # Derive document ID from key: raw/2026/05/05/test-001/original.png -> test-001
     parts = key.split("/")
@@ -157,6 +162,52 @@ def handler(event, context):
               routing=routing,
               low_confidence_lines=len(low_conf_lines))
 
+    # --- post-process with Bedrock (opt-in, REVIEW/ESCALATE only) ---
+    corrected_text = None
+    if enable_postprocess and routing != "ACCEPT":
+        t0 = time.monotonic()
+        try:
+            low_lines = [
+                f"[{b['Confidence']:.0f}%] {b['Text']}"
+                for b in lines if b["Confidence"] < CONFIDENCE_THRESHOLD
+            ]
+            prompt = (
+                "You are an OCR post-correction assistant. Below is text extracted from a "
+                "scanned historical document. Lines prefixed with confidence scores are the "
+                "ones the OCR engine was least certain about.\n\n"
+                "Low-confidence lines:\n" + "\n".join(low_lines) + "\n\n"
+                "Full extracted text:\n" + full_text + "\n\n"
+                "Please return the corrected full text. Fix OCR errors (misread characters, "
+                "broken words, nonsense substitutions) while preserving the original meaning "
+                "and structure. Only fix clear OCR errors — do not modernize spelling, "
+                "grammar, or punctuation. Return ONLY the corrected text, no commentary."
+            )
+
+            bedrock_response = bedrock.invoke_model(
+                modelId=BEDROCK_MODEL_ID,
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": 4096,
+                    "messages": [{"role": "user", "content": prompt}],
+                }),
+            )
+            bedrock_body = json.loads(bedrock_response["body"].read())
+            corrected_text = bedrock_body["content"][0]["text"]
+
+            elapsed = int((time.monotonic() - t0) * 1000)
+            log_event(doc_id, "postprocess", "SUCCESS", duration_ms=elapsed,
+                      engine="bedrock", model=BEDROCK_MODEL_ID,
+                      input_tokens=bedrock_body.get("usage", {}).get("input_tokens"),
+                      output_tokens=bedrock_body.get("usage", {}).get("output_tokens"))
+
+        except Exception as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            log_event(doc_id, "postprocess", "ERROR", duration_ms=elapsed,
+                      error_message=str(exc), error_type=type(exc).__name__)
+            # Non-fatal — continue with uncorrected text
+
     # Write to output/ or review/ based on routing
     if routing == "ACCEPT":
         dest_prefix = "output"
@@ -169,8 +220,11 @@ def handler(event, context):
         "routing": routing,
         "confidence": extracted["confidence"],
         "line_count": len(lines),
-        "text": full_text,
+        "text": corrected_text if corrected_text else full_text,
     }
+    if corrected_text:
+        result["original_text"] = full_text
+        result["postprocessing"] = {"engine": "bedrock", "model": BEDROCK_MODEL_ID}
 
     s3.put_object(
         Bucket=bucket,
