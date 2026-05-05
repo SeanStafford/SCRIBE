@@ -34,6 +34,12 @@ install-dev: venv
 	pip install -e ".[dev]"
 	@echo ">>> Development dependencies installed"
 
+## Install AWS dependencies
+.PHONY: install-aws
+install-aws: venv
+	pip install -e ".[aws]"
+	@echo ">>> AWS dependencies installed"
+
 #################################################################################
 # CODE HYGIENE COMMANDS                                                         #
 #################################################################################

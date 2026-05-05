@@ -39,6 +39,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+aws = [
+    "awscli>=1.32.0",
+    "boto3>=1.34.0",
+    "moto[s3,dynamodb,stepfunctions,textract]>=5.0.0",
+]
 dev = [
     "ruff>=0.1.0",
     "pytest>=7.4.0",
