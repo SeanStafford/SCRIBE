@@ -1,25 +1,38 @@
 # Image manifest — canonical names, original filenames, and processing metadata
 #
 # canonical: short, filesystem-friendly name used throughout the pipeline
-# original:  actual filename in data/images/
+# original:  original filename before renaming
+# filename:  current filename in data/images/
+# notes:     description
+# preprocessing:  hints for the pipeline
 
 images:
   grocery_contract:
+    filename: "grocery_contract.png"
     original: "The Colored Grocery.png"
-
+    notes: "1903 legal notarized contract for a safe."
+    preprocessing: {}
 
   wiretap_transcript:
+    filename: "wiretap_transcript.png"
     original: "Blurry_Document 1.png"
-
+    notes: "1950 deposition transcript. Contains strikethroughs, hole punches, handwritten margin notes."
+    preprocessing: {}
 
   mpa_newsletter:
+    filename: "mpa_newsletter.png"
     original: "IN-71-1.png"
-
+    notes: "Typewritten newsletter/bulletin for a community organization."
+    preprocessing: {}
 
   vance_deed:
+    filename: "vance_deed.png"
     original: "Vance Homeplace and Cemetery on West Fork (2017) _ Brandon Ray Kirk.png"
-
+    notes: "Legal deed with land descriptions. Photographed from a book. Tilted. Spine curvature, faded."
+    preprocessing: {}
 
   rattler_page:
+    filename: "rattler_page.png"
     original: "The Rattler _ Edwards & Broughton Printing Company _ Free Download____.png"
-
+    notes: "Book page with dialogue and prose. Clean image. Relatively high resolution."
+    preprocessing: {}
